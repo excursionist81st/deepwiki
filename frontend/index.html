@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepWiki - 代码仓库知识库</title>
+    <style>
+        :root {
+            --bg-color: rgb(0, 0, 0);
+            --text-color: rgb(255, 215, 0);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            padding: 20px;
+            transition: background 0.3s;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--text-color);
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .theme-switcher {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .theme-btn {
+            display: inline-block;
+            padding: 8px 20px;
+            margin: 0 5px;
+            border: 2px solid var(--text-color);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            background: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .theme-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .theme-btn.active {
+            background: var(--text-color);
+            color: var(--bg-color);
+        }
+
+
+        .card {
+            background: var(--bg-color);
+            border: 2px solid var(--text-color);
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: background 0.3s;
+        }
+
+        .card h2 {
+            color: var(--text-color);
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--text-color);
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-color);
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid var(--text-color);
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s, background 0.3s;
+            background: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        input[type="text"]:focus,
+        textarea:focus {
+            border-color: var(--text-color);
+            outline: none;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        button {
+            background: var(--text-color);
+            color: var(--bg-color);
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s, background 0.3s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: var(--bg-color);
+            border: 2px solid var(--text-color);
+            border-radius: 5px;
+            transition: background 0.3s;
+            white-space: pre-wrap;
+        }
+
+        .result h3 {
+            color: var(--text-color);
+            margin-bottom: 10px;
+        }
+
+        #stream-answer {
+            font-family: 'Consolas', 'Monaco', monospace;
+            line-height: 1.6;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: var(--text-color);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--bg-color);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-color);
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .reference {
+            background: var(--bg-color);
+            padding: 10px;
+            margin: 10px 0;
+            border: 2px solid var(--text-color);
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        .reference strong {
+            color: var(--text-color);
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status.pending {
+            background: #ffeaa7;
+            color: #d63031;
+        }
+
+        .status.processing {
+            background: #74b9ff;
+            color: #0984e3;
+        }
+
+        .status.completed {
+            background: #55efc4;
+            color: #00b894;
+        }
+
+        .status.failed {
+            background: #fab1a0;
+            color: #e17055;
+        }
+
+        .error {
+            color: #e74c3c;
+            background: var(--bg-color);
+            padding: 10px;
+            border: 2px solid var(--text-color);
+            border-radius: 5px;
+            margin-top: 10px;
+            transition: background 0.3s;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: var(--text-color);
+            margin-top: 5px;
+        }
+
+        .two-cols {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .two-cols {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 DeepWiki - 代码仓库知识库</h1>
+
+        <div class="theme-switcher">
+            <button class="theme-btn" onclick="switchTheme('green')">灰绿色</button>
+            <button class="theme-btn" onclick="switchTheme('blue')">灰蓝色</button>
+            <button class="theme-btn" onclick="switchTheme('orange')">橙黑色</button>
+            <button class="theme-btn active" onclick="switchTheme('black')">黑金色</button>
+
+        </div>
+
+        <div class="card">
+            <h2>📦 摄取仓库</h2>
+            <div class="form-group">
+                <label>仓库地址 (必填)</label>
+                <input type="text" id="repo_url" placeholder="https://github.com/gin-gonic/gin.git">
+                <div class="help-text">支持 GitHub、GitLab 等公开仓库</div>
+            </div>
+            <div class="form-group">
+                <label>仓库名称 (必填)</label>
+                <input type="text" id="repo_name" placeholder="gin_repo">
+                <div class="help-text">本地存储的名称，用于后续查询</div>
+            </div>
+            <div class="two-cols">
+                <div class="form-group">
+                    <label>包含扩展名 (可选)</label>
+                    <input type="text" id="include_exts" placeholder=".go, .md, .py">
+                    <div class="help-text">逗号分隔，只处理这些文件</div>
+                </div>
+                <div class="form-group">
+                    <label>排除目录 (可选)</label>
+                    <input type="text" id="exclude_dirs" placeholder="examples, tests, docs">
+                    <div class="help-text">逗号分隔，跳过这些目录</div>
+                </div>
+            </div>
+            <button onclick="ingestRepo()">开始摄取</button>
+            <div id="ingest-result"></div>
+        </div>
+
+        <div class="card">
+            <h2>📊 查询进度</h2>
+            <div class="form-group">
+                <label>任务ID</label>
+                <input type="text" id="task_id" placeholder="task_1234567890">
+            </div>
+            <button onclick="checkStatus()">查询进度</button>
+            <div id="status-result"></div>
+        </div>
+
+        <div class="card">
+            <h2>💬 代码问答</h2>
+            <div class="form-group">
+                <label>仓库名称</label>
+                <input type="text" id="ask_repo_name" placeholder="gin_repo">
+            </div>
+            <div class="form-group">
+                <label>问题</label>
+                <textarea id="question" placeholder="例如：如何创建一个路由？"></textarea>
+            </div>
+            <div class="form-group">
+                <label>DeepSeek API Key (可选)</label>
+                <input type="text" id="api_key" placeholder="留空则使用配置文件中的API Key">
+                <div class="help-text">临时使用，不保存到配置文件</div>
+            </div>
+            <div class="form-group">
+                <label>Base URL (可选)</label>
+                <input type="text" id="base_url" placeholder="https://api.deepseek.com">
+            </div>
+            <button onclick="askQuestion()">提问</button>
+            <div id="ask-result"></div>
+        </div>
+
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+
+        const themes = {
+            green: {
+                bg: 'rgb(34, 34, 34)',
+                text: 'rgb(191, 255, 0)'
+            },
+            blue: {
+                bg: 'rgb(44, 44, 52)',
+                text: 'rgb(0, 212, 255)'
+            },
+            orange: {
+                bg: 'rgb(18, 18, 18)',
+                text: 'rgb(255, 69, 0)'
+            },
+            black: {
+                bg: 'rgb(0, 0, 0)',
+                text: 'rgb(255, 215, 0)'
+            }
+        };
+
+        let currentTheme = 'black';
+
+        function applyTheme() {
+            const theme = themes[currentTheme];
+            const root = document.documentElement;
+            root.style.setProperty('--bg-color', theme.bg);
+            root.style.setProperty('--text-color', theme.text);
+        }
+
+        function switchTheme(theme) {
+            currentTheme = theme;
+            const btns = document.querySelectorAll('.theme-btn');
+            btns.forEach(btn => btn.classList.remove('active'));
+            
+            if (theme === 'blue') {
+                btns[1].classList.add('active');
+            } else if (theme === 'orange') {
+                btns[2].classList.add('active');
+            } else if (theme === 'black') {
+                btns[3].classList.add('active');
+            } else {
+                btns[0].classList.add('active');
+            }
+            
+            applyTheme();
+        }
+
+        async function ingestRepo() {
+            const repo_url = document.getElementById('repo_url').value;
+            const repo_name = document.getElementById('repo_name').value;
+            const include_exts = document.getElementById('include_exts').value;
+            const exclude_dirs = document.getElementById('exclude_dirs').value;
+
+            if (!repo_url || !repo_name) {
+                showResult('ingest-result', '<div class="error">请填写仓库地址和名称</div>');
+                return;
+            }
+
+            const data = {
+                repo_url: repo_url,
+                repo_name: repo_name
+            };
+
+            if (include_exts) {
+                data.include_exts = include_exts.split(',').map(s => s.trim());
+            }
+            if (exclude_dirs) {
+                data.exclude_dirs = exclude_dirs.split(',').map(s => s.trim());
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/ingest`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showResult('ingest-result', `
+                        <div class="result">
+                            <h3>✅ 摄取任务已提交</h3>
+                            <p><strong>任务ID:</strong> ${result.task_id}</p>
+                            <p>${result.message}</p>
+                            <button onclick="document.getElementById('task_id').value='${result.task_id}'; checkStatus();">
+                                查看进度
+                            </button>
+                        </div>
+                    `);
+                } else {
+                    showResult('ingest-result', `<div class="error">错误: ${result.error}</div>`);
+                }
+            } catch (error) {
+                showResult('ingest-result', `<div class="error">请求失败: ${error.message}</div>`);
+            }
+        }
+
+        async function checkStatus() {
+            const task_id = document.getElementById('task_id').value;
+
+            if (!task_id) {
+                showResult('status-result', '<div class="error">请输入任务ID</div>');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/ingest/${task_id}/status`);
+                const result = await response.json();
+
+                if (response.ok) {
+                    const progress = result.progress || 0;
+                    const statusClass = result.status || 'pending';
+
+                    showResult('status-result', `
+                        <div class="result">
+                            <h3>任务状态</h3>
+                            <p><strong>任务ID:</strong> ${result.task_id}</p>
+                            <p><strong>状态:</strong> <span class="status ${statusClass}">${result.status}</span></p>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%">${progress}%</div>
+                            </div>
+                            ${result.error ? `<div class="error">错误: ${result.error}</div>` : ''}
+                        </div>
+                    `);
+
+                    if (result.status === 'processing') {
+                        setTimeout(checkStatus, 2000);
+                    }
+                } else {
+                    showResult('status-result', `<div class="error">错误: ${result.error}</div>`);
+                }
+            } catch (error) {
+                showResult('status-result', `<div class="error">请求失败: ${error.message}</div>`);
+            }
+        }
+
+        async function askQuestion() {
+            const repo_name = document.getElementById('ask_repo_name').value;
+            const question = document.getElementById('question').value;
+            const api_key = document.getElementById('api_key').value;
+            const base_url = document.getElementById('base_url').value;
+
+            if (!repo_name || !question) {
+                showResult('ask-result', '<div class="error">请填写仓库名称和问题</div>');
+                return;
+            }
+
+            const data = {
+                repo_name: repo_name,
+                question: question
+            };
+
+            if (api_key) data.api_key = api_key;
+            if (base_url) data.base_url = base_url;
+
+            showResult('ask-result', '<div class="result"><h3>💡 答案</h3><p id="stream-answer"></p></div>');
+            const answerElement = document.getElementById('stream-answer');
+
+            try {
+                const response = await fetch(`${API_BASE}/ask`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    answerElement.textContent += chunk;
+                }
+            } catch (error) {
+                showResult('ask-result', `<div class="error">请求失败: ${error.message}</div>`);
+            }
+        }
+
+        function showResult(elementId, html) {
+            document.getElementById(elementId).innerHTML = html;
+        }
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+database:
+  host: localhost
+  port: 3306
+  user: your_user
+  password: your_password
+  name: deepwiki
+
+deepseek:
+  api_key: "please use the api_key that you own"
+  base_url: "https://api.deepseek.com"
