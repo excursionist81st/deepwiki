@@ -43,11 +43,12 @@ type CodeChunk struct {
 }
 
 type IngestRequest struct {
-	RepoURL     string   `json:"repo_url" binding:"required"`
-	RepoName    string   `json:"repo_name" binding:"required"`
-	IncludeExts []string `json:"include_exts,omitempty"`
-	ExcludeDirs []string `json:"exclude_dirs,omitempty"`
-	ExcludeExts []string `json:"exclude_exts,omitempty"`
+	RepoURL      string   `json:"repo_url" binding:"required"`
+	RepoName     string   `json:"repo_name" binding:"required"`
+	IncludeExts  []string `json:"include_exts,omitempty"`
+	IncludeFiles []string `json:"include_files,omitempty"`
+	ExcludeDirs  []string `json:"exclude_dirs,omitempty"`
+	ExcludeExts  []string `json:"exclude_exts,omitempty"`
 }
 
 type IngestResponse struct {

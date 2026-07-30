@@ -13,10 +13,12 @@ type GitCloner struct {
 }
 
 type FileFilter struct {
-	ExcludeDirs []string
-	ExcludeExts []string
-	IncludeExts []string
-	MaxFileSize int64
+	ExcludeDirs  []string
+	ExcludeExts  []string
+	ExcludeFiles []string
+	IncludeExts  []string
+	IncludeFiles []string
+	MaxFileSize  int64
 }
 
 func NewFileFilter() *FileFilter {
@@ -28,6 +30,16 @@ func NewFileFilter() *FileFilter {
 		ExcludeExts: []string{
 			".pyc", ".so", ".dll", ".exe", ".bin",
 			".png", ".jpg", ".gif", ".pdf", ".zip",
+			".mod", ".sum", ".lock",
+		},
+		ExcludeFiles: []string{
+			"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+			"requirements.txt", "Pipfile.lock", "poetry.lock",
+			"pom.xml", "build.gradle", "gradle.lockfile",
+			"Cargo.toml", "Cargo.lock",
+			"Gemfile", "Gemfile.lock",
+			"composer.json", "composer.lock",
+			"kitex_info.yaml",
 		},
 		MaxFileSize: 1 * 1024 * 1024,
 	}
@@ -98,6 +110,14 @@ func (g *GitCloner) shouldSkipDir(relPath string, filter *FileFilter) bool {
 }
 
 func (f *FileFilter) ShouldSkip(path string, info os.FileInfo) bool {
+	filename := filepath.Base(path)
+
+	for _, name := range f.IncludeFiles {
+		if filename == name {
+			return false
+		}
+	}
+
 	for _, dir := range f.ExcludeDirs {
 		if strings.Contains(path, string(os.PathSeparator)+dir+string(os.PathSeparator)) {
 			return true
@@ -107,6 +127,12 @@ func (f *FileFilter) ShouldSkip(path string, info os.FileInfo) bool {
 	ext := filepath.Ext(path)
 	for _, e := range f.ExcludeExts {
 		if ext == e {
+			return true
+		}
+	}
+
+	for _, name := range f.ExcludeFiles {
+		if filename == name {
 			return true
 		}
 	}

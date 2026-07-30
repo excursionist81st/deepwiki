@@ -27,6 +27,15 @@ func GetRepositoryByName(name string) (*model.Repository, error) {
 	return &repo, nil
 }
 
+func GetRepositoryByID(id uint) (*model.Repository, error) {
+	var repo model.Repository
+	err := db.Where("id = ?", id).First(&repo).Error
+	if err != nil {
+		return nil, err
+	}
+	return &repo, nil
+}
+
 func UpdateRepositoryStatus(id uint, status string) error {
 	return db.Model(&model.Repository{}).Where("id = ?", id).Update("status", status).Error
 }

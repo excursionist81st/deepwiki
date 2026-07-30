@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,7 +46,7 @@ func executeIngest(taskID string, repoID uint, repoURL, repoName string, filter 
 
 	repoPath, err := cloner.Clone(repoURL, repoName, filter)
 	if err != nil {
-		dao.UpdateTaskError(taskID, err.Error())
+		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
 		dao.UpdateRepositoryStatus(repoID, "failed")
 		return
 	}
@@ -56,19 +57,38 @@ func executeIngest(taskID string, repoID uint, repoURL, repoName string, filter 
 
 	chunks, err := chunkRepository(repoPath, repoID)
 	if err != nil {
-		dao.UpdateTaskError(taskID, err.Error())
+		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
 		return
 	}
 
 	dao.UpdateTaskProgress(taskID, 80, "processing")
 
 	if err := saveCodeChunks(repoID, chunks); err != nil {
-		dao.UpdateTaskError(taskID, err.Error())
+		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
 		return
 	}
 
 	dao.UpdateTaskProgress(taskID, 100, "completed")
 	dao.UpdateRepositoryStatus(repoID, "completed")
+}
+
+func sanitizeIngestError(err error) string {
+	errMsg := err.Error()
+
+	if strings.Contains(errMsg, "TLS handshake timeout") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "wsarecv") {
+		return "网络连接超时，请检查网络或使用镜像地址"
+	}
+	if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {
+		return "无法连接到服务器，请检查网络连接"
+	}
+	if strings.Contains(errMsg, "repository not found") || strings.Contains(errMsg, "404") {
+		return "仓库不存在或无访问权限"
+	}
+	if strings.Contains(errMsg, "authentication required") || strings.Contains(errMsg, "401") || strings.Contains(errMsg, "403") {
+		return "认证失败，请检查访问权限"
+	}
+
+	return "操作失败，请稍后重试"
 }
 
 func chunkRepository(repoPath string, repoID uint) ([]model.CodeChunk, error) {
@@ -84,7 +104,6 @@ func chunkRepository(repoPath string, repoID uint) ([]model.CodeChunk, error) {
 		if err != nil {
 			return nil
 		}
-
 		for i := range fileChunks {
 			fileChunks[i].RepoID = repoID
 			chunks = append(chunks, fileChunks[i])

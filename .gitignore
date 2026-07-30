@@ -4,10 +4,5 @@ config.yaml
 # 克隆的仓库
 data/
 
-# CodeArts 工具文件
-.codeartsdoer/
-.arts/
-.merkle-snapshot.json
-
 # 编译产物
 *.exe

@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"deepseek_wiki/config"
@@ -19,12 +20,15 @@ type QAService struct {
 }
 
 func NewQAService(apiKey, baseURL string) *QAService {
+	alibabaKey := config.GetString("alibaba.api_key")
+	alibabaURL := config.GetString("alibaba.base_url")
 	return &QAService{
-		client: deepseek.NewClient(apiKey, baseURL),
+		client: deepseek.NewClientWithAlibaba(apiKey, baseURL, alibabaKey, alibabaURL),
 	}
 }
 
 func (s *QAService) AskStream(repoName, question string, onChunk func(chunk string)) error {
+
 	repo, err := dao.GetRepositoryByName(repoName)
 	if err != nil {
 		return err
@@ -62,6 +66,7 @@ func (s *QAService) AskStream(repoName, question string, onChunk func(chunk stri
 	}
 
 	err = s.client.ChatStream(messages, wrappedOnChunk)
+
 	if err != nil {
 		return err
 	}
@@ -91,6 +96,12 @@ func (s *QAService) retrieveRelevantChunks(repo *model.Repository, question stri
 		if successCount == totalCount {
 			dao.UpdateRepositoryHasEmbedding(repo.ID, true)
 		}
+
+		var err error
+		chunks, err = dao.GetCodeChunksByRepo(repo.ID)
+		if err != nil {
+			return []model.CodeChunk{}
+		}
 	}
 
 	questionEmb, err := s.embeddingWithRetry(question, 3)
@@ -115,6 +126,10 @@ func (s *QAService) retrieveRelevantChunks(repo *model.Repository, question stri
 		}{chunks[i], score})
 	}
 
+	if len(scores) == 0 {
+		return chunks[:min(topK, len(chunks))]
+	}
+
 	sort.Slice(scores, func(i, j int) bool {
 		return scores[i].score > scores[j].score
 	})
@@ -129,22 +144,126 @@ func (s *QAService) retrieveRelevantChunks(repo *model.Repository, question stri
 
 func (s *QAService) embedAllChunks(chunks []model.CodeChunk) (successCount, totalCount int) {
 	totalCount = len(chunks)
+
+	var pendingChunks []model.CodeChunk
 	for i := range chunks {
-		switch chunks[i].EmbeddingStatus {
-		case "success":
+		if chunks[i].EmbeddingStatus == "success" {
 			successCount++
-		case "pending", "failed":
-			enhancedContent := s.buildEnhancedContent(chunks[i])
-			embedding, err := s.embeddingWithRetry(enhancedContent, 3)
-			if err != nil {
-				dao.UpdateCodeChunkEmbeddingFailed(chunks[i].ID, err.Error())
+		} else if chunks[i].EmbeddingStatus == "pending" || chunks[i].EmbeddingStatus == "failed" {
+			pendingChunks = append(pendingChunks, chunks[i])
+		}
+	}
+
+	if len(pendingChunks) == 0 {
+		return
+	}
+
+	batchSize := config.GetInt("qa.batch_size")
+	if batchSize <= 0 {
+		batchSize = 25
+	}
+
+	maxConcurrency := config.GetInt("qa.max_concurrency")
+	if maxConcurrency <= 0 {
+		maxConcurrency = 5
+	}
+
+	maxTextLen := config.GetInt("qa.max_text_len")
+	if maxTextLen <= 0 {
+		maxTextLen = 7000
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	batches := make([][]model.CodeChunk, 0)
+	for i := 0; i < len(pendingChunks); i += batchSize {
+		end := i + batchSize
+		if end > len(pendingChunks) {
+			end = len(pendingChunks)
+		}
+		batches = append(batches, pendingChunks[i:end])
+	}
+
+	sem := make(chan struct{}, maxConcurrency)
+
+	for batchIdx, batch := range batches {
+		wg.Add(1)
+		go func(batchIdx int, batchChunks []model.CodeChunk) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			var validChunks []model.CodeChunk
+			var texts []string
+			for _, chunk := range batchChunks {
+				text := s.buildEnhancedContent(chunk)
+				if len(text) > maxTextLen {
+					dao.UpdateCodeChunkEmbeddingFailed(chunk.ID, "文本过长，跳过向量化")
+					continue
+				}
+				validChunks = append(validChunks, chunk)
+				texts = append(texts, text)
+			}
+
+			if len(texts) == 0 {
+				return
+			}
+
+			embeddings, err := s.client.EmbeddingBatch(texts)
+
+			if err != nil || len(embeddings) != len(texts) {
+				for _, chunk := range validChunks {
+					embedding, singleErr := s.embeddingWithRetry(s.buildEnhancedContent(chunk), 3)
+					if singleErr != nil {
+						errMsg := "单个向量化失败"
+						errMsg = singleErr.Error()
+						dao.UpdateCodeChunkEmbeddingFailed(chunk.ID, errMsg)
+						continue
+					}
+					if dao.UpdateCodeChunkEmbedding(chunk.ID, embedding) == nil {
+						mu.Lock()
+						successCount++
+						mu.Unlock()
+					}
+				}
+				return
+			}
+
+			for i, embedding := range embeddings {
+				if embedding == nil || len(embedding) == 0 {
+					dao.UpdateCodeChunkEmbeddingFailed(validChunks[i].ID, "向量化结果为空")
+					continue
+				}
+				if dao.UpdateCodeChunkEmbedding(validChunks[i].ID, embedding) == nil {
+					mu.Lock()
+					successCount++
+					mu.Unlock()
+				}
+			}
+		}(batchIdx, batch)
+	}
+
+	wg.Wait()
+
+	for _, chunk := range pendingChunks {
+		chunkEmb, err := dao.GetEmbeddingFromChunk(&chunk)
+		if err != nil || chunkEmb == nil {
+			text := s.buildEnhancedContent(chunk)
+			if len(text) > maxTextLen {
 				continue
 			}
-			if dao.UpdateCodeChunkEmbedding(chunks[i].ID, embedding) == nil {
+			embedding, retryErr := s.embeddingWithRetry(text, 3)
+			if retryErr != nil {
+				dao.UpdateCodeChunkEmbeddingFailed(chunk.ID, retryErr.Error())
+				continue
+			}
+			if dao.UpdateCodeChunkEmbedding(chunk.ID, embedding) == nil {
 				successCount++
 			}
 		}
 	}
+
 	return
 }
 
@@ -181,7 +300,7 @@ func (s *QAService) embeddingWithRetry(text string, maxRetries int) ([]float64, 
 
 	for i := 0; i < maxRetries; i++ {
 		embedding, err = s.client.Embedding(text)
-		if err == nil {
+		if err == nil && embedding != nil {
 			return embedding, nil
 		}
 		if i < maxRetries-1 {
@@ -253,13 +372,6 @@ func cosineSimilarity(a, b []float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func getMemoryFilePath() string {

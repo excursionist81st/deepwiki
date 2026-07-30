@@ -16,40 +16,49 @@
 - ✅ 懒加载向量化（首次提问时计算并缓存）
 - ✅ 向量化增强（包含函数名、签名、类名）
 - ✅ AI 自主维护对话记忆（存储在 data/memory.md）
+- ✅ 批量向量化与并发控制（避免API限流）
 
 ## 项目中遇到的问题与处理方式
 
-q1. 在摄取仓库时就完成代码块向量化，可能造成 token 浪费（只想克隆到本地，不会提问或先简单的看了看代码后才会提问）
+**Q1: DeepSeek不提供embedding接口，如何实现RAG？**
 
-a1. 功能分离，在提问时完成代码向量化，只有在最后提问时才会使用 api 消耗 token
+A1: 使用第三方embedding服务，如阿里云百炼embedding API。
 
-q2. 多次提问，出现将代码块重复向量化的问题，token 浪费
+**Q2: 在摄取仓库时就完成代码块向量化，可能造成 token 浪费（只想克隆到本地，不会提问或先简单的看了看代码后才会提问）**
 
-a2. 标记仓库是否被提问，提问过则已完成向量化，读取首次提问时存储的向量化结果
+A2: 功能分离，在提问时完成代码向量化，只有在最后提问时才会使用 api 消耗 token。
 
-q3. 标记仓库是否被提问不妥，可能因部分代码块向量化失败而全部重复向量化
+**Q3: 多次提问，出现将代码块重复向量化的问题，token 浪费**
 
-a3. 改为标记代码块是否向量化，增强颗粒度
+A3: 标记仓库是否被提问，提问过则已完成向量化，读取首次提问时存储的向量化结果。
 
-q4. 增强代码块颗粒度，但代码类型不同，读 context 太难
+**Q4: 标记仓库是否被提问不妥，可能因部分代码块向量化失败而全部重复向量化**
 
-a4. 解析 AST（抽象类型树）实现代码分块（gotreesitter，实现了大部分语言（本项目中，包含了 go, py, js, ts, java, cpp, cxx, cc, c, rs, rb, php）的 AST 解析）
+A4: 改为标记代码块是否向量化，增强颗粒度。
 
-q5. 解析 AST 可能耗时较长（长注释，长字符串，多导入等造成的多无效节点）
+**Q5: 增强代码块颗粒度，但代码类型不同，读 context 太难**
 
-a5. 添加 ShouldSkip 检验跳过一些节点，避免无效检查子节点耗时
+A5: 解析 AST（抽象类型树）实现代码分块（gotreesitter，实现了大部分语言（本项目中，包含了 go, py, js, ts, java, cpp, cxx, cc, c, rs, rb, php）的 AST 解析）。
 
-q6. 如何增强向量检索能力？
+**Q6: 解析 AST 可能耗时较长（长注释，长字符串，多导入等造成的多无效节点）**
 
-a6. 向量化代码块前强调函数签名，父级结构体等
+A6: 添加 ShouldSkip 检验跳过一些节点，避免无效检查子节点耗时。
 
-q7. 如何获取函数方法名？
+**Q7: 使用AST实现函数/类级别代码块后，代码块数量大增，向量化耗时长**
 
-a7. AST 解析时解析其子节点，子节点类型为 "name" 等时为函数/方法名（匿名函数没有函数名，就不写入）
+A7: 向量化时批量向量化(25个一批)，减少API调用次数。
 
-q8. 如何实现多轮对话？
+**Q8: 出现多批代码块时，单批向量化速度低**
 
-a8. 使用文件存储对话记忆（data/memory.md），AI 自主决定是否更新记忆。在回答末尾使用 `<memory_update>...</memory_update>` 标记更新内容，后端自动提取并追加到记忆文件中。
+A8: 使用go异步与并发限制和WaitGroup，提升向量化速度同时避免触发API限流。
+
+**Q9: 如何增强向量检索能力？**
+
+A9: 向量化代码块前强调函数签名，父级结构体等。
+
+**Q10: 如何实现多轮对话？**
+
+A10: 使用文件存储对话记忆（data/memory.md），AI 自主决定是否更新记忆。在回答末尾使用 `<memory_update>...</memory_update>` 标记更新内容，后端自动提取并追加到记忆文件中。
 
 ## 项目框架
 
@@ -117,9 +126,16 @@ deepseek:
   api_key: "your_deepseek_api_key"
   base_url: "https://api.deepseek.com"
 
+alibaba:
+  api_key: "your_alibaba_api_key"  # 阿里云百炼 API Key
+  base_url: "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+
 qa:
   top_k: 10                    # 检索代码块数量
   max_context_tokens: 4000     # 最大上下文 token 数
+  batch_size: 25               # 批量向量化大小
+  max_concurrency: 5           # 最大并发数
+  max_text_len: 7000           # 最大文本长度
 
 memory:
   file_path: "data/memory.md"  # 对话记忆文件路径
@@ -131,7 +147,12 @@ memory:
 CREATE DATABASE deepwiki CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 3. 启动服务
+### 3. 获取 API Key
+
+- DeepSeek API Key: https://platform.deepseek.com/
+- 阿里云百炼 API Key: https://dashscope.console.aliyun.com/
+
+### 4. 启动服务
 
 ```bash
 ./deepwiki.exe
@@ -141,7 +162,7 @@ go run main.go
 
 服务将在 `http://localhost:8000` 启动
 
-### 4. 访问前端
+### 5. 访问前端
 
 打开浏览器访问: `http://localhost:8000`
 
@@ -181,7 +202,6 @@ curl -X POST http://localhost:8000/api/ask \
     "question": "如何创建路由？"
   }'
 ```
-
 
 ## 核心模块详解
 
@@ -340,10 +360,13 @@ curl -X POST http://localhost:8000/api/ask \
 8. 返回 Top-K 个最相关代码块
 
 **embedAllChunks()** - 批量向量化：
-- 遍历代码块
-- 检查向量化状态
+- 从配置读取 batch_size、max_concurrency、max_text_len
+- 遍历代码块，检查向量化状态
+- 按批次分组（batch_size 个一批）
+- 使用 goroutine 并发处理（max_concurrency 个并发）
 - 调用 `buildEnhancedContent()` 构建增强内容
-- 调用 `embeddingWithRetry()` 向量化
+- 调用 `client.EmbeddingBatch()` 批量向量化
+- 失败时降级为单个向量化
 - 更新向量化结果或错误状态
 
 **buildEnhancedContent()** - 构建增强向量化内容：
@@ -379,13 +402,24 @@ curl -X POST http://localhost:8000/api/ask \
 - 使用 OpenAI SDK v3
 - 支持自定义 API Key 和 Base URL
 
+**NewClientWithAlibaba()** - 创建带阿里云 Embedding 的客户端：
+- 支持 DeepSeek Chat + 阿里云 Embedding
+- 需要配置 alibaba.api_key
+
 **ChatStream()** - 流式对话：
 - 调用 `Chat.Completions.NewStreaming()` 获取流式响应
 - 通过回调函数 `onChunk` 实时返回内容块
 
 **Embedding()** - 文本向量化：
-- 使用 `deepseek-embedding` 模型
+- 使用阿里云百炼 `text-embedding-v2` 模型
+- 调用 https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
 - 设置 30 秒超时限制
+- 返回 1536 维向量
+
+**EmbeddingBatch()** - 批量文本向量化：
+- 支持一次请求处理多个文本（最多25个）
+- 减少API调用次数，提升效率
+- 失败时返回 nil，调用方应降级为单个向量化
 
 ### handlers/ HTTP 处理层
 
@@ -406,7 +440,6 @@ curl -X POST http://localhost:8000/api/ask \
 - 设置 SSE 响应头
 - 调用 `qaService.AskStream()` 流式返回答案
 
-
 ## 技术栈
 
 | 层级 | 技术 | 版本 |
@@ -418,6 +451,7 @@ curl -X POST http://localhost:8000/api/ask \
 | Git 操作 | go-git/v5 | v5.19.1 |
 | AST 解析 | gotreesitter | v0.46.0 |
 | LLM API | OpenAI SDK v3 | v3.44.0 |
+| Embedding API | 阿里云百炼 | text-embedding-v2 |
 | 前端 | 原生 HTML/JS + Fetch Stream | - |
 
 ## 数据流
@@ -433,7 +467,7 @@ Git 克隆 → 文件过滤 → AST 分块（函数/方法级）
     ↓
 读取对话记忆（记忆文件）
     ↓
-问题向量化 → 检索 Top-K 代码块（余弦相似度）
+问题向量化（阿里云）→ 检索 Top-K 代码块（余弦相似度）
     ↓
 构建 Prompt（包含记忆） → DeepSeek 流式回答
     ↓
@@ -441,6 +475,50 @@ Git 克隆 → 文件过滤 → AST 分块（函数/方法级）
     ↓
 前端实时显示（支持换行）
 ```
+
+## Embedding API 说明
+
+由于 DeepSeek Embedding API 返回 404 错误，项目改用阿里云百炼 Embedding API。
+
+**对比：**
+
+| 项目 | DeepSeek | 阿里云百炼 |
+|------|----------|-----------|
+| 端点 | /embeddings | /text-embedding/text-embedding |
+| 模型 | deepseek-embedding | text-embedding-v2 |
+| 状态 | 404 Not Found | ✓ 可用 |
+| 维度 | - | 1536 |
+| 价格 | - | ¥0.0007/千token |
+| 批量支持 | - | ✓ 最多25个/批 |
+
+**使用方法：**
+
+1. 获取阿里云 API Key：https://dashscope.console.aliyun.com/
+2. 配置 `config.yaml` 中的 `alibaba.api_key`
+3. 启动服务即可使用
+
+**工作流程：**
+
+- 摄取仓库：保存代码块（不向量化）
+- 首次提问：懒加载向量化（阿里云 Embedding）
+  - 批量向量化（batch_size=25）
+  - 并发控制（max_concurrency=5）
+  - 避免API限流
+- 后续提问：直接使用已存储的向量
+
+**限流说明：**
+
+阿里云百炼API有以下限流：
+- **RPM限流**：每分钟请求次数限制
+- **TPM限流**：每分钟Token消耗限制
+- 限流按主账号维度计算，所有子账号、业务空间合并统计
+- 超限后通常1分钟内自动恢复
+
+**应对策略：**
+- 代码层面已做并发控制（max_concurrency=5）
+- 批量接口减少API调用次数
+- 可在百炼控制台申请临时提额（有效期30天）
+- 高峰期可考虑使用Batch API（不受实时限流约束）
 
 ## 许可证
 
