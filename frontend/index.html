@@ -242,6 +242,70 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        .task-list-header {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            padding: 10px;
+            background: var(--text-color);
+            color: var(--bg-color);
+            font-weight: bold;
+            border-radius: 5px 5px 0 0;
+            margin-bottom: 5px;
+        }
+
+        .task-item {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid var(--text-color);
+            border-radius: 3px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+
+        .task-item.completed {
+            opacity: 0.6;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .task-item.processing {
+            border-color: #74b9ff;
+            background: rgba(116, 185, 255, 0.1);
+        }
+
+        .task-item.error {
+            border-color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+        }
+
+        .task-col {
+            display: flex;
+            align-items: center;
+            word-break: break-all;
+        }
+
+        .task-progress-bar {
+            width: 100%;
+            height: 20px;
+            background: var(--text-color);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .task-progress-fill {
+            height: 100%;
+            background: var(--bg-color);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-color);
+            font-size: 12px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -297,6 +361,16 @@
         </div>
 
         <div class="card">
+            <h2>📋 任务列表</h2>
+            <div class="task-list-header">
+                <div class="task-col">仓库名称</div>
+                <div class="task-col">任务ID</div>
+                <div class="task-col">摄取进度</div>
+            </div>
+            <div id="task-list"></div>
+        </div>
+
+        <div class="card">
             <h2>📊 查询进度</h2>
             <div class="form-group">
                 <label>任务ID</label>
@@ -322,8 +396,17 @@
                 <div class="help-text">临时使用，不保存到配置文件</div>
             </div>
             <div class="form-group">
-                <label>Base URL (可选)</label>
+                <label>DeepSeek Base URL (可选)</label>
                 <input type="text" id="base_url" placeholder="https://api.deepseek.com">
+            </div>
+            <div class="form-group">
+                <label>阿里云百炼 API Key (可选)</label>
+                <input type="text" id="alibaba_api_key" placeholder="留空则使用配置文件中的API Key">
+                <div class="help-text">用于向量化，临时使用不保存</div>
+            </div>
+            <div class="form-group">
+                <label>阿里云百炼 Base URL (可选)</label>
+                <input type="text" id="alibaba_base_url" placeholder="https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding">
             </div>
             <button onclick="askQuestion()">提问</button>
             <div id="ask-result"></div>
@@ -332,6 +415,9 @@
 
     <script>
         const API_BASE = 'http://localhost:8000/api';
+        let lastProgressMessage = null;
+        let taskList = [];
+        let currentRepoName = '';
 
         const themes = {
             green: {
@@ -380,6 +466,8 @@
         }
 
         async function ingestRepo() {
+            lastProgressMessage = null;
+            
             const repo_url = document.getElementById('repo_url').value;
             const repo_name = document.getElementById('repo_name').value;
             const include_exts = document.getElementById('include_exts').value;
@@ -391,6 +479,8 @@
                 showResult('ingest-result', '<div class="error">请填写仓库地址和名称</div>');
                 return;
             }
+
+            currentRepoName = repo_name;
 
             const data = {
                 repo_url: repo_url,
@@ -427,17 +517,129 @@
                             <h3>✅ 摄取任务已提交</h3>
                             <p><strong>任务ID:</strong> ${result.task_id}</p>
                             <p>${result.message}</p>
-                            <button onclick="document.getElementById('task_id').value='${result.task_id}'; checkStatus();">
-                                查看进度
-                            </button>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%">0%</div>
+                            </div>
                         </div>
                     `);
+                    
+                    connectWebSocket(result.task_id, repo_name);
                 } else {
                     showResult('ingest-result', `<div class="error">错误: ${result.error}</div>`);
                 }
             } catch (error) {
                 showResult('ingest-result', `<div class="error">请求失败: ${error.message}</div>`);
             }
+        }
+
+        function updateTaskList(taskId, repoName, progress, status) {
+            const existingIndex = taskList.findIndex(t => t.taskId === taskId);
+            
+            if (existingIndex !== -1) {
+                taskList[existingIndex].progress = progress;
+                taskList[existingIndex].status = status;
+            } else {
+                taskList.push({
+                    taskId: taskId,
+                    repoName: repoName,
+                    progress: progress,
+                    status: status
+                });
+            }
+            
+            if (progress === 100 || status === 'error') {
+                const taskIndex = taskList.findIndex(t => t.taskId === taskId);
+                if (taskIndex !== -1) {
+                    const task = taskList.splice(taskIndex, 1)[0];
+                    taskList.push(task);
+                }
+            }
+            
+            renderTaskList();
+        }
+
+        function renderTaskList() {
+            const container = document.getElementById('task-list');
+            
+            if (taskList.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-color);">暂无任务</div>';
+                return;
+            }
+            
+            container.innerHTML = taskList.map(task => {
+                const statusClass = task.status === 'completed' ? 'completed' : 
+                                   task.status === 'error' ? 'error' : 
+                                   task.status === 'processing' ? 'processing' : '';
+                
+                return `
+                    <div class="task-item ${statusClass}">
+                        <div class="task-col">${task.repoName}</div>
+                        <div class="task-col">${task.taskId}</div>
+                        <div class="task-col">
+                            <div class="task-progress-bar">
+                                <div class="task-progress-fill" style="width: ${task.progress}%">${task.progress}%</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function connectWebSocket(taskId, repoName) {
+            updateTaskList(taskId, repoName, 0, 'pending');
+            
+            const ws = new WebSocket(`ws://localhost:8000/api/ingest/progress?task_id=${taskId}`);
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                lastProgressMessage = data;
+                
+                const progress = data.progress || 0;
+                const status = data.status || 'pending';
+                
+                updateTaskList(taskId, repoName, progress, status);
+                
+                const statusClass = status;
+                
+                showResult('ingest-result', `
+                    <div class="result">
+                        <h3>任务状态</h3>
+                        <p><strong>任务ID:</strong> ${data.task_id}</p>
+                        <p><strong>状态:</strong> <span class="status ${statusClass}">${data.status}</span></p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progress}%">${progress}%</div>
+                        </div>
+                        ${data.error ? `<div class="error">错误: ${data.error}</div>` : ''}
+                    </div>
+                `);
+                
+                if (data.status === 'completed' || data.status === 'failed') {
+                    ws.close();
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+            };
+            
+            ws.onclose = function() {
+                if (lastProgressMessage) {
+                    const progress = lastProgressMessage.progress || 0;
+                    const statusClass = lastProgressMessage.status || 'pending';
+                    
+                    showResult('ingest-result', `
+                        <div class="result">
+                            <h3>任务状态（已完成）</h3>
+                            <p><strong>任务ID:</strong> ${lastProgressMessage.task_id}</p>
+                            <p><strong>状态:</strong> <span class="status ${statusClass}">${lastProgressMessage.status}</span></p>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%">${progress}%</div>
+                            </div>
+                            ${lastProgressMessage.error ? `<div class="error">错误: ${lastProgressMessage.error}</div>` : ''}
+                        </div>
+                    `);
+                }
+            };
         }
 
         async function checkStatus() {
@@ -484,6 +686,8 @@
             const question = document.getElementById('question').value;
             const api_key = document.getElementById('api_key').value;
             const base_url = document.getElementById('base_url').value;
+            const alibaba_api_key = document.getElementById('alibaba_api_key').value;
+            const alibaba_base_url = document.getElementById('alibaba_base_url').value;
 
             if (!repo_name || !question) {
                 showResult('ask-result', '<div class="error">请填写仓库名称和问题</div>');
@@ -497,6 +701,8 @@
 
             if (api_key) data.api_key = api_key;
             if (base_url) data.base_url = base_url;
+            if (alibaba_api_key) data.alibaba_api_key = alibaba_api_key;
+            if (alibaba_base_url) data.alibaba_base_url = alibaba_base_url;
 
             try {
                 showResult('ask-result', '<div class="result"><h3>💡 答案</h3><div id="stream-answer" style="white-space: pre-wrap; word-wrap: break-word;"></div></div>');

@@ -5,7 +5,9 @@ import (
 
 	"deepseek_wiki/config"
 	"deepseek_wiki/dao"
+
 	"deepseek_wiki/routers"
+	"deepseek_wiki/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +20,10 @@ func main() {
 	if err := dao.InitDB(); err != nil {
 		log.Fatal("数据库初始化失败: ", err)
 	}
+
+	service.InitWebSocket()
+
+	service.SetProgressCallback(service.BroadcastProgress)
 
 	r := gin.Default()
 

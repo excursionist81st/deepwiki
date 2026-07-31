@@ -85,6 +85,8 @@ func AskStreamHandler(c *gin.Context) {
 
 	apiKey := req.ApiKey
 	baseURL := req.BaseURL
+	alibabaKey := req.AlibabaAPIKey
+	alibabaURL := req.AlibabaBaseURL
 
 	if apiKey == "" {
 		apiKey = config.GetString("deepseek.api_key")
@@ -92,8 +94,14 @@ func AskStreamHandler(c *gin.Context) {
 	if baseURL == "" {
 		baseURL = config.GetString("deepseek.base_url")
 	}
+	if alibabaKey == "" {
+		alibabaKey = config.GetString("alibaba.api_key")
+	}
+	if alibabaURL == "" {
+		alibabaURL = config.GetString("alibaba.base_url")
+	}
 
-	qaService := service.NewQAService(apiKey, baseURL)
+	qaService := service.NewQAServiceWithAlibaba(apiKey, baseURL, alibabaKey, alibabaURL)
 
 	c.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Writer.Header().Set("Cache-Control", "no-cache")

@@ -2,9 +2,8 @@ package service
 
 import (
 	"fmt"
-	"math"
 	"os"
-	"sort"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"deepseek_wiki/dao"
 	"deepseek_wiki/deepseek"
 	"deepseek_wiki/model"
+	"deepseek_wiki/pkg"
 )
 
 type QAService struct {
@@ -27,8 +27,13 @@ func NewQAService(apiKey, baseURL string) *QAService {
 	}
 }
 
-func (s *QAService) AskStream(repoName, question string, onChunk func(chunk string)) error {
+func NewQAServiceWithAlibaba(apiKey, baseURL, alibabaKey, alibabaURL string) *QAService {
+	return &QAService{
+		client: deepseek.NewClientWithAlibaba(apiKey, baseURL, alibabaKey, alibabaURL),
+	}
+}
 
+func (s *QAService) AskStream(repoName, question string, onChunk func(chunk string)) error {
 	repo, err := dao.GetRepositoryByName(repoName)
 	if err != nil {
 		return err
@@ -66,7 +71,6 @@ func (s *QAService) AskStream(repoName, question string, onChunk func(chunk stri
 	}
 
 	err = s.client.ChatStream(messages, wrappedOnChunk)
-
 	if err != nil {
 		return err
 	}
@@ -82,6 +86,8 @@ func (s *QAService) AskStream(repoName, question string, onChunk func(chunk stri
 	if hasUpdate {
 		onChunk("\n\n[记忆已更新]")
 	}
+
+	onChunk("\n\n" + s.formatReferences(relevantChunks))
 
 	return nil
 }
@@ -109,37 +115,13 @@ func (s *QAService) retrieveRelevantChunks(repo *model.Repository, question stri
 		return chunks[:min(topK, len(chunks))]
 	}
 
-	scores := make([]struct {
-		chunk model.CodeChunk
-		score float64
-	}, 0, len(chunks))
+	vectorScores := pkg.VectorSearch(questionEmb, chunks)
+	keywordScores := pkg.KeywordSearch(question, chunks)
+	hybridScores := pkg.HybridSearch(vectorScores, keywordScores, chunks)
 
-	for i := range chunks {
-		chunkEmb, err := dao.GetEmbeddingFromChunk(&chunks[i])
-		if err != nil || chunkEmb == nil {
-			continue
-		}
-		score := cosineSimilarity(questionEmb, chunkEmb)
-		scores = append(scores, struct {
-			chunk model.CodeChunk
-			score float64
-		}{chunks[i], score})
-	}
+	reranked := pkg.Rerank(question, hybridScores, topK)
 
-	if len(scores) == 0 {
-		return chunks[:min(topK, len(chunks))]
-	}
-
-	sort.Slice(scores, func(i, j int) bool {
-		return scores[i].score > scores[j].score
-	})
-
-	result := make([]model.CodeChunk, 0, topK)
-	for i := 0; i < topK && i < len(scores); i++ {
-		result = append(result, scores[i].chunk)
-	}
-
-	return result
+	return reranked
 }
 
 func (s *QAService) embedAllChunks(chunks []model.CodeChunk) (successCount, totalCount int) {
@@ -191,6 +173,7 @@ func (s *QAService) embedAllChunks(chunks []model.CodeChunk) (successCount, tota
 		wg.Add(1)
 		go func(batchIdx int, batchChunks []model.CodeChunk) {
 			defer wg.Done()
+
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -231,7 +214,7 @@ func (s *QAService) embedAllChunks(chunks []model.CodeChunk) (successCount, tota
 			}
 
 			for i, embedding := range embeddings {
-				if embedding == nil || len(embedding) == 0 {
+				if len(embedding) == 0 {
 					dao.UpdateCodeChunkEmbeddingFailed(validChunks[i].ID, "向量化结果为空")
 					continue
 				}
@@ -245,24 +228,6 @@ func (s *QAService) embedAllChunks(chunks []model.CodeChunk) (successCount, tota
 	}
 
 	wg.Wait()
-
-	for _, chunk := range pendingChunks {
-		chunkEmb, err := dao.GetEmbeddingFromChunk(&chunk)
-		if err != nil || chunkEmb == nil {
-			text := s.buildEnhancedContent(chunk)
-			if len(text) > maxTextLen {
-				continue
-			}
-			embedding, retryErr := s.embeddingWithRetry(text, 3)
-			if retryErr != nil {
-				dao.UpdateCodeChunkEmbeddingFailed(chunk.ID, retryErr.Error())
-				continue
-			}
-			if dao.UpdateCodeChunkEmbedding(chunk.ID, embedding) == nil {
-				successCount++
-			}
-		}
-	}
 
 	return
 }
@@ -361,19 +326,6 @@ type Reference struct {
 	Language  string `json:"language"`
 }
 
-func cosineSimilarity(a, b []float64) float64 {
-	var dot, normA, normB float64
-	for i := range a {
-		dot += a[i] * b[i]
-		normA += a[i] * a[i]
-		normB += b[i] * b[i]
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
 func getMemoryFilePath() string {
 	path := config.GetString("memory.file_path")
 	if path == "" {
@@ -383,15 +335,27 @@ func getMemoryFilePath() string {
 }
 
 func (s *QAService) readMemory() string {
-	data, err := os.ReadFile(getMemoryFilePath())
+	filePath := getMemoryFilePath()
+
+	data, err := os.ReadFile(filePath)
 	if err != nil {
+		dir := filepath.Dir(filePath)
+		os.MkdirAll(dir, 0755)
+		os.WriteFile(filePath, []byte(""), 0644)
 		return ""
 	}
 	return string(data)
 }
 
 func (s *QAService) updateMemory(newContent string) error {
-	return os.WriteFile(getMemoryFilePath(), []byte(newContent), 0644)
+	filePath := getMemoryFilePath()
+
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, []byte(newContent), 0644)
 }
 
 func (s *QAService) extractMemoryUpdate(response string) (answer string, memoryUpdate string, hasUpdate bool) {
@@ -412,4 +376,34 @@ func (s *QAService) extractMemoryUpdate(response string) (answer string, memoryU
 	answer = strings.TrimSpace(response[:startIdx] + response[endIdx+len(endTag):])
 
 	return answer, memoryUpdate, true
+}
+
+func (s *QAService) formatReferences(chunks []model.CodeChunk) string {
+	if len(chunks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString("📚 参考代码块\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	for i, chunk := range chunks {
+		sb.WriteString(fmt.Sprintf("【%d】%s\n", i+1, chunk.FilePath))
+		sb.WriteString(fmt.Sprintf("    行号: %d-%d\n", chunk.StartLine, chunk.EndLine))
+
+		if chunk.SymbolName != "" {
+			sb.WriteString(fmt.Sprintf("    函数: %s\n", chunk.SymbolName))
+		} else {
+			sb.WriteString("    函数: 匿名\n")
+		}
+
+		if chunk.ParentSymbol != "" {
+			sb.WriteString(fmt.Sprintf("    类名: %s\n", chunk.ParentSymbol))
+		}
+
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }

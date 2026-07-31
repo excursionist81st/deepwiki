@@ -2,11 +2,21 @@ package config
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
 func Init() error {
+	// 加载 .env 文件（可选）
+	if err := godotenv.Load(); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("加载 .env 文件失败: %w", err)
+		}
+		// .env 文件不存在，使用系统环境变量
+	}
+
 	viper.AutomaticEnv()
 
 	viper.SetConfigName("config")
@@ -16,7 +26,7 @@ func Init() error {
 	if err := viper.ReadInConfig(); err != nil {
 		switch err.(type) {
 		case viper.ConfigFileNotFoundError:
-			return fmt.Errorf("配置文件不存在: ./config/config.yaml")
+			// 配置文件可选，使用环境变量
 		default:
 			return fmt.Errorf("配置文件语法错误: %w", err)
 		}
@@ -39,4 +49,8 @@ func GetInt(key string) int {
 		panic(fmt.Sprintf("%s 未配置", key))
 	}
 	return value
+}
+
+func GetFloat(key string) float64 {
+	return viper.GetFloat64(key)
 }

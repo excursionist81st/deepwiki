@@ -5,6 +5,8 @@ go 1.26.5
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-git/go-git/v5 v5.19.1
+	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	github.com/odvcencio/gotreesitter v0.46.0
 	github.com/openai/openai-go/v3 v3.44.0
 	github.com/spf13/viper v1.21.0

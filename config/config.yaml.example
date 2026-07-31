@@ -1,10 +1,24 @@
 database:
   host: localhost
   port: 3306
-  user: your_user
+  user: root
   password: your_password
   name: deepwiki
 
 deepseek:
-  api_key: "please use the api_key that you own"
+  api_key: "your_deepseek_api_key"
   base_url: "https://api.deepseek.com"
+
+alibaba:
+  api_key: "your_alibaba_api_key"
+  base_url: "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+
+qa:
+  top_k: 10
+  max_context_tokens: 4000
+  batch_size: 25
+  max_concurrency: 5
+  max_text_len: 7000
+
+memory:
+  file_path: "data/memory.md"

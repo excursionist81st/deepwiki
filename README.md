@@ -154,9 +154,24 @@ CREATE DATABASE deepwiki CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ### 4. 启动服务
 
+**方式1：使用外部配置文件（推荐，更安全）**
 ```bash
-./deepwiki.exe
-# 或
+# 1. 将 deepwiki.env 移动到 D:\env\deepwiki.env
+# 2. 使用启动脚本加载
+.\start.ps1
+
+# 或指定自定义路径
+.\start.ps1 -EnvPath D:\env\my-config.env
+```
+
+**方式2：使用 .env 文件（项目内）**
+```bash
+# 创建 .env 文件（参考 deepwiki.env）
+.\deepwiki.exe
+```
+
+**方式3：直接运行**
+```bash
 go run main.go
 ```
 
@@ -165,6 +180,33 @@ go run main.go
 ### 5. 访问前端
 
 打开浏览器访问: `http://localhost:8000`
+
+## 配置文件安全建议
+
+### 推荐方案：外部配置文件
+
+将配置文件放在项目目录外，即使打开项目文件夹也看不到敏感信息：
+
+```bash
+# Windows
+D:\env\deepwiki.env           # 配置文件
+D:\projects\deepseek_wiki\    # 项目目录
+```
+
+**启动方式：**
+```powershell
+.\start.ps1
+```
+
+**优势：**
+- ✅ 配置文件完全隔离，项目内看不到
+- ✅ 多个项目可共享同一配置文件
+- ✅ 配置文件可单独备份和管理
+- ✅ 团队协作时每人使用自己的配置文件
+- ✅ 配置文件完全隔离，项目内看不到
+- ✅ 多个项目可共享同一配置文件
+- ✅ 配置文件可单独备份和管理
+- ✅ 团队协作时每人使用自己的配置文件
 
 ## API 接口
 
@@ -202,6 +244,7 @@ curl -X POST http://localhost:8000/api/ask \
     "question": "如何创建路由？"
   }'
 ```
+
 
 ## 核心模块详解
 

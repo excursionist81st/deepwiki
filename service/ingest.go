@@ -14,6 +14,14 @@ import (
 	"deepseek_wiki/pkg"
 )
 
+type ProgressCallback func(taskID, status string, progress int, errMsg string)
+
+var progressCallback ProgressCallback
+
+func SetProgressCallback(cb ProgressCallback) {
+	progressCallback = cb
+}
+
 type TaskManager struct {
 	tasks sync.Map
 }
@@ -21,6 +29,11 @@ type TaskManager struct {
 var taskManager = &TaskManager{}
 
 func IngestRepo(repoURL, repoName string, filter *pkg.FileFilter) (string, error) {
+	existingRepo, err := dao.GetRepositoryByName(repoName)
+	if err == nil && existingRepo != nil {
+		return "", fmt.Errorf("仓库 '%s' 已存在，请使用不同的名称或删除现有仓库", repoName)
+	}
+
 	taskID := generateTaskID()
 
 	repo, err := dao.CreateRepository(repoName, repoURL, fmt.Sprintf("./data/repos/%s", repoName))
@@ -38,37 +51,56 @@ func IngestRepo(repoURL, repoName string, filter *pkg.FileFilter) (string, error
 }
 
 func executeIngest(taskID string, repoID uint, repoURL, repoName string, filter *pkg.FileFilter) {
-	dao.UpdateTaskProgress(taskID, 0, "processing")
+	updateProgress := func(progress int, status string) {
+		dao.UpdateTaskProgress(taskID, progress, status)
+		if progressCallback != nil {
+			progressCallback(taskID, status, progress, "")
+		}
+	}
+
+	updateProgress(0, "processing")
 
 	cloner := &pkg.GitCloner{RepoDir: "./data/repos"}
 
-	dao.UpdateTaskProgress(taskID, 10, "processing")
+	updateProgress(10, "processing")
 
 	repoPath, err := cloner.Clone(repoURL, repoName, filter)
 	if err != nil {
-		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
+		errMsg := sanitizeIngestError(err)
+		dao.UpdateTaskError(taskID, errMsg)
 		dao.UpdateRepositoryStatus(repoID, "failed")
+		if progressCallback != nil {
+			progressCallback(taskID, "failed", 0, errMsg)
+		}
 		return
 	}
 
-	dao.UpdateTaskProgress(taskID, 50, "processing")
+	updateProgress(50, "processing")
 
 	dao.UpdateRepositoryStatus(repoID, "processing")
 
 	chunks, err := chunkRepository(repoPath, repoID)
 	if err != nil {
-		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
+		errMsg := sanitizeIngestError(err)
+		dao.UpdateTaskError(taskID, errMsg)
+		if progressCallback != nil {
+			progressCallback(taskID, "failed", 50, errMsg)
+		}
 		return
 	}
 
-	dao.UpdateTaskProgress(taskID, 80, "processing")
+	updateProgress(80, "processing")
 
 	if err := saveCodeChunks(repoID, chunks); err != nil {
-		dao.UpdateTaskError(taskID, sanitizeIngestError(err))
+		errMsg := sanitizeIngestError(err)
+		dao.UpdateTaskError(taskID, errMsg)
+		if progressCallback != nil {
+			progressCallback(taskID, "failed", 80, errMsg)
+		}
 		return
 	}
 
-	dao.UpdateTaskProgress(taskID, 100, "completed")
+	updateProgress(100, "completed")
 	dao.UpdateRepositoryStatus(repoID, "completed")
 }
 

@@ -57,8 +57,10 @@ type IngestResponse struct {
 }
 
 type AskRequest struct {
-	RepoName string `json:"repo_name" binding:"required"`
-	Question string `json:"question" binding:"required"`
-	ApiKey   string `json:"api_key,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
+	RepoName       string `json:"repo_name" binding:"required"`
+	Question       string `json:"question" binding:"required"`
+	ApiKey         string `json:"api_key,omitempty"`
+	BaseURL        string `json:"base_url,omitempty"`
+	AlibabaAPIKey  string `json:"alibaba_api_key,omitempty"`
+	AlibabaBaseURL string `json:"alibaba_base_url,omitempty"`
 }
