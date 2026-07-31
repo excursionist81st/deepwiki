@@ -8,7 +8,10 @@
 - ✅ 自动跳过 .git/、vendor/、node_modules/ 等目录
 - ✅ 支持用户自定义 include/exclude 规则
 - ✅ 代码块追溯到来源文件、行号范围、语言
-- ✅ 基于向量检索的语义相似度匹配
+- ✅ 混合检索（向量检索 + 关键词检索）
+- ✅ Rerank 重排序优化检索结果
+- ✅ WebSocket 实时推送摄取进度
+- ✅ 前端任务列表实时显示多个任务
 - ✅ 流式响应，实时显示回答
 - ✅ 异步摄取，支持进度查询
 - ✅ 索引持久化，重启后无需重新摄取
@@ -17,6 +20,8 @@
 - ✅ 向量化增强（包含函数名、签名、类名）
 - ✅ AI 自主维护对话记忆（存储在 data/memory.md）
 - ✅ 批量向量化与并发控制（避免API限流）
+- ✅ 仓库重复检查（避免重复摄取）
+- ✅ 权重可配置化（向量权重、关键词权重）
 
 ## 项目中遇到的问题与处理方式
 
@@ -68,6 +73,8 @@ deepseek_wiki/
 ├── go.mod                  # 依赖管理
 ├── go.sum                  # 依赖校验
 ├── README.md               # 项目文档
+├── start.ps1               # Windows 启动脚本
+├── deepwiki.env            # 配置文件示例
 │
 ├── config/                 # 配置层
 │   ├── config.go           # Viper 配置读取
@@ -85,14 +92,16 @@ deepseek_wiki/
 │
 ├── pkg/                    # 工具包
 │   ├── gitclone.go         # Git 克隆 + 文件过滤
-│   └── chunker.go          # AST 分块器（支持 206 种语言）
+│   ├── chunker.go          # AST 分块器（支持 206 种语言）
+│   └── top.go              # 检索算法（向量、关键词、混合、Rerank）
 │
 ├── deepseek/               # DeepSeek API 封装
 │   └── client.go           # Chat、ChatStream、Embedding 方法
 │
 ├── service/                # 业务逻辑层
 │   ├── ingest.go           # 仓库摄取（异步任务、代码分块）
-│   └── qa.go               # 问答服务（向量检索、流式回答）
+│   ├── qa.go               # 问答服务（向量检索、流式回答）
+│   └── websocket.go        # WebSocket 服务（实时进度推送）
 │
 ├── handlers/               # HTTP 处理层
 │   └── handlers.go         # IngestHandler、StatusHandler、AskStreamHandler
@@ -101,7 +110,7 @@ deepseek_wiki/
 │   └── route.go            # 注册 API 路由
 │
 ├── frontend/               # 前端
-│   └── index.html          # 单页面应用（主题切换、流式响应）
+│   └── index.html          # 单页面应用（主题切换、流式响应、任务列表）
 │
 └── data/                   # 数据存储
     ├── repos/              # 克隆的仓库本地目录
@@ -136,6 +145,8 @@ qa:
   batch_size: 25               # 批量向量化大小
   max_concurrency: 5           # 最大并发数
   max_text_len: 7000           # 最大文本长度
+  vector_weight: 0.7           # 向量检索权重
+  keyword_weight: 0.3          # 关键词检索权重
 
 memory:
   file_path: "data/memory.md"  # 对话记忆文件路径
@@ -224,6 +235,52 @@ curl -X POST http://localhost:8000/api/ingest \
   }'
 ```
 
+**响应：**
+```json
+{
+  "task_id": "task_1234567890",
+  "message": "摄取任务已提交"
+}
+```
+
+**错误：仓库已存在**
+```json
+{
+  "error": "仓库 'gin_repo' 已存在，请使用不同的名称或删除现有仓库"
+}
+```
+
+### WebSocket /api/ingest/progress
+
+实时推送摄取进度
+
+**连接：**
+```javascript
+const ws = new WebSocket('ws://localhost:8000/api/ingest/progress?task_id=task_xxx');
+```
+
+**消息格式：**
+```json
+{
+  "task_id": "task_1234567890",
+  "status": "processing",
+  "progress": 50,
+  "error": ""
+}
+```
+
+**状态说明：**
+- `processing`：处理中
+- `completed`：完成（进度100%，自动关闭连接）
+- `failed`：失败
+
+**进度节点：**
+- 0%：任务开始
+- 10%：克隆完成
+- 50%：分块完成
+- 80%：保存完成
+- 100%：任务完成
+
 ### GET /api/ingest/:id/status
 
 查询摄取进度
@@ -244,6 +301,13 @@ curl -X POST http://localhost:8000/api/ask \
     "question": "如何创建路由？"
   }'
 ```
+
+**检索流程：**
+1. 向量检索（语义相似度）
+2. 关键词检索（精确匹配）
+3. 混合检索（70% 向量 + 30% 关键词）
+4. Rerank 重排序
+5. 返回 Top-K 代码块
 
 
 ## 核心模块详解
