@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,12 @@ func NewFileFilter() *FileFilter {
 func (g *GitCloner) Clone(repoURL, repoName string, filter *FileFilter) (string, error) {
 	targetPath := filepath.Join(g.RepoDir, repoName)
 
+	if _, err := os.Stat(targetPath); err == nil {
+		if err := os.RemoveAll(targetPath); err != nil {
+			return "", fmt.Errorf("删除旧仓库目录失败: %v", err)
+		}
+	}
+
 	_, err := git.PlainClone(targetPath, false, &git.CloneOptions{
 		URL:      repoURL,
 		Depth:    1,
@@ -55,13 +62,13 @@ func (g *GitCloner) Clone(repoURL, repoName string, filter *FileFilter) (string,
 	})
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("克隆仓库失败: %v", err)
 	}
 
 	if filter != nil {
 		err = g.cleanFiles(targetPath, filter)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("清理文件失败: %v", err)
 		}
 	}
 

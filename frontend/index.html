@@ -719,12 +719,20 @@
                 const decoder = new TextDecoder();
                 const answerElement = document.getElementById('stream-answer');
                 
+                let buffer = '';
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
                     
-                    const chunk = decoder.decode(value, { stream: true });
-                    answerElement.innerText += chunk;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            answerElement.innerText += line.substring(6);
+                        }
+                    }
                 }
             } catch (error) {
                 showResult('ask-result', `<div class="error">请求失败: ${error.message}</div>`);

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -29,9 +30,7 @@ type TaskManager struct {
 var taskManager = &TaskManager{}
 
 func IngestRepo(repoURL, repoName string, filter *pkg.FileFilter) (string, error) {
-	existingRepo, err := dao.GetRepositoryByName(repoName)
-	if err == nil && existingRepo != nil {
-		return "", fmt.Errorf("仓库 '%s' 已存在，请使用不同的名称或删除现有仓库", repoName)
+	if err := dao.DeleteRepositoryByName(repoName); err != nil {
 	}
 
 	taskID := generateTaskID()
@@ -51,31 +50,33 @@ func IngestRepo(repoURL, repoName string, filter *pkg.FileFilter) (string, error
 }
 
 func executeIngest(taskID string, repoID uint, repoURL, repoName string, filter *pkg.FileFilter) {
-	updateProgress := func(progress int, status string) {
-		dao.UpdateTaskProgress(taskID, progress, status)
-		if progressCallback != nil {
-			progressCallback(taskID, status, progress, "")
-		}
+	dao.UpdateTaskProgress(taskID, 0, "processing")
+	if progressCallback != nil {
+		progressCallback(taskID, "processing", 0, "")
 	}
-
-	updateProgress(0, "processing")
 
 	cloner := &pkg.GitCloner{RepoDir: "./data/repos"}
 
-	updateProgress(10, "processing")
+	dao.UpdateTaskProgress(taskID, 10, "processing")
+	if progressCallback != nil {
+		progressCallback(taskID, "processing", 10, "")
+	}
 
 	repoPath, err := cloner.Clone(repoURL, repoName, filter)
 	if err != nil {
 		errMsg := sanitizeIngestError(err)
 		dao.UpdateTaskError(taskID, errMsg)
-		dao.UpdateRepositoryStatus(repoID, "failed")
+		dao.DeleteRepositoryByName(repoName)
 		if progressCallback != nil {
 			progressCallback(taskID, "failed", 0, errMsg)
 		}
 		return
 	}
 
-	updateProgress(50, "processing")
+	dao.UpdateTaskProgress(taskID, 50, "processing")
+	if progressCallback != nil {
+		progressCallback(taskID, "processing", 50, "")
+	}
 
 	dao.UpdateRepositoryStatus(repoID, "processing")
 
@@ -83,24 +84,32 @@ func executeIngest(taskID string, repoID uint, repoURL, repoName string, filter 
 	if err != nil {
 		errMsg := sanitizeIngestError(err)
 		dao.UpdateTaskError(taskID, errMsg)
+		dao.DeleteRepositoryByName(repoName)
 		if progressCallback != nil {
 			progressCallback(taskID, "failed", 50, errMsg)
 		}
 		return
 	}
 
-	updateProgress(80, "processing")
+	dao.UpdateTaskProgress(taskID, 80, "processing")
+	if progressCallback != nil {
+		progressCallback(taskID, "processing", 80, "")
+	}
 
 	if err := saveCodeChunks(repoID, chunks); err != nil {
 		errMsg := sanitizeIngestError(err)
 		dao.UpdateTaskError(taskID, errMsg)
+		dao.DeleteRepositoryByName(repoName)
 		if progressCallback != nil {
 			progressCallback(taskID, "failed", 80, errMsg)
 		}
 		return
 	}
 
-	updateProgress(100, "completed")
+	dao.UpdateTaskProgress(taskID, 100, "completed")
+	if progressCallback != nil {
+		progressCallback(taskID, "completed", 100, "")
+	}
 	dao.UpdateRepositoryStatus(repoID, "completed")
 }
 
@@ -108,19 +117,22 @@ func sanitizeIngestError(err error) string {
 	errMsg := err.Error()
 
 	if strings.Contains(errMsg, "TLS handshake timeout") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "wsarecv") {
-		return "网络连接超时，请检查网络或使用镜像地址"
+		return fmt.Sprintf("网络连接超时: %s", errMsg)
 	}
 	if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") {
-		return "无法连接到服务器，请检查网络连接"
+		return fmt.Sprintf("无法连接到服务器: %s", errMsg)
 	}
 	if strings.Contains(errMsg, "repository not found") || strings.Contains(errMsg, "404") {
-		return "仓库不存在或无访问权限"
+		return fmt.Sprintf("仓库不存在: %s", errMsg)
 	}
 	if strings.Contains(errMsg, "authentication required") || strings.Contains(errMsg, "401") || strings.Contains(errMsg, "403") {
-		return "认证失败，请检查访问权限"
+		return fmt.Sprintf("认证失败: %s", errMsg)
+	}
+	if strings.Contains(errMsg, "already exists") {
+		return fmt.Sprintf("目录已存在: %s", errMsg)
 	}
 
-	return "操作失败，请稍后重试"
+	return fmt.Sprintf("操作失败: %s", errMsg)
 }
 
 func chunkRepository(repoPath string, repoID uint) ([]model.CodeChunk, error) {

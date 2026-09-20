@@ -64,3 +64,22 @@ type AskRequest struct {
 	AlibabaAPIKey  string `json:"alibaba_api_key,omitempty"`
 	AlibabaBaseURL string `json:"alibaba_base_url,omitempty"`
 }
+
+type ProgressMessage struct {
+	TaskID   string `json:"task_id"`
+	Status   string `json:"status"`
+	Progress int    `json:"progress"`
+	Error    string `json:"error,omitempty"`
+}
+
+type Answer struct {
+	Answer     string      `json:"answer"`
+	References []Reference `json:"references"`
+}
+
+type Reference struct {
+	FilePath  string `json:"file_path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Language  string `json:"language"`
+}

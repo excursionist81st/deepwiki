@@ -1,9 +1,10 @@
 package service
 
 import (
-	"log"
 	"net/http"
 	"sync"
+
+	"deepseek_wiki/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -24,16 +25,8 @@ var upgrader = websocket.Upgrader{
 			}
 		}
 
-		log.Printf("WebSocket连接被拒绝: Origin=%s", origin)
 		return false
 	},
-}
-
-type ProgressMessage struct {
-	TaskID   string `json:"task_id"`
-	Status   string `json:"status"`
-	Progress int    `json:"progress"`
-	Error    string `json:"error,omitempty"`
 }
 
 type WebSocketManager struct {
@@ -73,7 +66,7 @@ func (m *WebSocketManager) Unregister(taskID string, conn *websocket.Conn) {
 }
 
 func (m *WebSocketManager) BroadcastProgress(taskID, status string, progress int, errMsg string) {
-	msg := ProgressMessage{
+	msg := model.ProgressMessage{
 		TaskID:   taskID,
 		Status:   status,
 		Progress: progress,
@@ -90,7 +83,7 @@ func (m *WebSocketManager) BroadcastProgress(taskID, status string, progress int
 
 	for conn := range clients {
 		if err := conn.WriteJSON(msg); err != nil {
-			log.Printf("WebSocket发送失败: %v", err)
+
 			delete(clients, conn)
 			conn.Close()
 		}
@@ -114,7 +107,7 @@ func WebSocketHandler(c *gin.Context) {
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("WebSocket升级失败: %v", err)
+
 		return
 	}
 	defer wsManager.Unregister(taskID, conn)

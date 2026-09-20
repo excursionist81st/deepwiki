@@ -301,10 +301,10 @@ func (s *QAService) buildPromptWithMemory(question string, chunks []model.CodeCh
 	return sb.String()
 }
 
-func (s *QAService) extractReferences(chunks []model.CodeChunk) []Reference {
-	refs := make([]Reference, 0, len(chunks))
+func (s *QAService) extractReferences(chunks []model.CodeChunk) []model.Reference {
+	refs := make([]model.Reference, 0, len(chunks))
 	for _, chunk := range chunks {
-		refs = append(refs, Reference{
+		refs = append(refs, model.Reference{
 			FilePath:  chunk.FilePath,
 			StartLine: chunk.StartLine,
 			EndLine:   chunk.EndLine,
@@ -312,18 +312,6 @@ func (s *QAService) extractReferences(chunks []model.CodeChunk) []Reference {
 		})
 	}
 	return refs
-}
-
-type Answer struct {
-	Answer     string      `json:"answer"`
-	References []Reference `json:"references"`
-}
-
-type Reference struct {
-	FilePath  string `json:"file_path"`
-	StartLine int    `json:"start_line"`
-	EndLine   int    `json:"end_line"`
-	Language  string `json:"language"`
 }
 
 func getMemoryFilePath() string {

@@ -43,3 +43,20 @@ func UpdateRepositoryStatus(id uint, status string) error {
 func UpdateRepositoryHasEmbedding(id uint, hasEmbedding bool) error {
 	return db.Model(&model.Repository{}).Where("id = ?", id).Update("has_embedding", hasEmbedding).Error
 }
+
+func DeleteRepositoryByName(name string) error {
+	var repo model.Repository
+	if err := db.Where("name = ?", name).First(&repo).Error; err != nil {
+		return nil
+	}
+
+	if err := db.Where("repo_id = ?", repo.ID).Delete(&model.CodeChunk{}).Error; err != nil {
+		return err
+	}
+
+	if err := db.Where("repo_id = ?", repo.ID).Delete(&model.IngestTask{}).Error; err != nil {
+		return err
+	}
+
+	return db.Delete(&repo).Error
+}

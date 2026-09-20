@@ -90,31 +90,32 @@ func AskStreamHandler(c *gin.Context) {
 
 	if apiKey == "" {
 		apiKey = config.GetString("deepseek.api_key")
-	}
-	if baseURL == "" {
+		baseURL = config.GetString("deepseek.base_url")
+	} else if baseURL == "" {
 		baseURL = config.GetString("deepseek.base_url")
 	}
+
 	if alibabaKey == "" {
 		alibabaKey = config.GetString("alibaba.api_key")
-	}
-	if alibabaURL == "" {
+		alibabaURL = config.GetString("alibaba.base_url")
+	} else if alibabaURL == "" {
 		alibabaURL = config.GetString("alibaba.base_url")
 	}
 
 	qaService := service.NewQAServiceWithAlibaba(apiKey, baseURL, alibabaKey, alibabaURL)
 
-	c.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Flush()
 
 	err := qaService.AskStream(req.RepoName, req.Question, func(chunk string) {
-		c.Writer.Write([]byte(chunk))
+		c.Writer.Write([]byte("data: " + chunk + "\n\n"))
 		c.Writer.Flush()
 	})
 
 	if err != nil {
-		c.Writer.Write([]byte("\n\n错误: " + sanitizeError(err)))
+		c.Writer.Write([]byte("data: 错误: " + sanitizeError(err) + "\n\n"))
 		c.Writer.Flush()
 	}
 }
